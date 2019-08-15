@@ -527,6 +527,7 @@ func (cm *ConnManager) Start() {
 	}
 
 	for i := atomic.LoadUint64(&cm.connReqCount); i < uint64(cm.cfg.TargetOutbound); i++ {
+		//建立节点连接
 		go cm.NewConnReq()
 	}
 }

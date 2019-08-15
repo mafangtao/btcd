@@ -14,7 +14,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
-
+	//"github.com/btcsuite/btclog"
 	"github.com/btcsuite/btcd/blockchain/indexers"
 	"github.com/btcsuite/btcd/database"
 	"github.com/btcsuite/btcd/limits"
@@ -43,6 +43,7 @@ var winServiceMain func() (bool, error)
 func btcdMain(serverChan chan<- *server) error {
 	// Load configuration and parse command line.  This function also
 	// initializes logging and configures it accordingly.
+	//加载配置信息，使用了github.com/jessevdk/go-flags这个第三方库，可以实现从配置文件或命令行获取参数值，功能挺强大的库，近期也有一直在维护。
 	tcfg, _, err := loadConfig()
 	if err != nil {
 		return err
@@ -57,6 +58,7 @@ func btcdMain(serverChan chan<- *server) error {
 	// Get a channel that will be closed when a shutdown signal has been
 	// triggered either from an OS signal such as SIGINT (Ctrl+C) or from
 	// another subsystem such as the RPC server.
+	//这个方法主要是使用signal.Notify(interruptChannel, interruptSignals...)来监听系统interrupt的signal，如有中断则close channel。
 	interrupt := interruptListener()
 	defer btcdLog.Info("Shutdown complete")
 
@@ -99,6 +101,7 @@ func btcdMain(serverChan chan<- *server) error {
 	}
 
 	// Load the block database.
+	//根据cfg.DbType配置打开数据库连接。通过代码得知支持数据库有dbTypes := []string{"ffldb", "leveldb", "sqlite"}
 	db, err := loadBlockDB()
 	if err != nil {
 		btcdLog.Errorf("%v", err)
@@ -145,6 +148,25 @@ func btcdMain(serverChan chan<- *server) error {
 	}
 
 	// Create server and start it.
+	//使用配置的端口、刚连接的db及网络参数初始一个server对象。
+	//activeNetParams.Params是硬编码参数，如下：
+	//var MainNetParams = Params{
+	//	Name:        "mainnet",
+	//	Net:         wire.MainNet,
+	//	DefaultPort: "8333",
+	//	DNSSeeds: []DNSSeed{
+	//		{"seed.bitcoin.sipa.be", true},
+	//		{"dnsseed.bluematt.me", true},
+	//		{"dnsseed.bitcoin.dashjr.org", false},
+	//		{"seed.bitcoinstats.com", true},
+	//		{"seed.bitnodes.io", false},
+	//		{"seed.bitcoin.jonasschnelli.ch", true},
+	//	},
+	//
+	//	// Chain parameters
+	//	GenesisBlock:             &genesisBlock,
+	//}
+
 	server, err := newServer(cfg.Listeners, cfg.AgentBlacklist,
 		cfg.AgentWhitelist, db, activeNetParams.Params, interrupt)
 	if err != nil {
@@ -300,6 +322,7 @@ func main() {
 	// Use all processor cores.
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
+	//设置垃圾回收比率
 	// Block and transaction processing can cause bursty allocations.  This
 	// limits the garbage collector from excessively overallocating during
 	// bursts.  This value was arrived at with the help of profiling live
@@ -307,6 +330,8 @@ func main() {
 	debug.SetGCPercent(10)
 
 	// Up some limits.
+	//limits包中有针对不同平台的三个文件：limits_plan9.go limits_unix.go limits_windows.go
+	//设置系统资源限制
 	if err := limits.SetLimits(); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to set limits: %v\n", err)
 		os.Exit(1)

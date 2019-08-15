@@ -794,6 +794,7 @@ func (sp *serverPeer) OnGetHeaders(_ *peer.Peer, msg *wire.MsgGetHeaders) {
 	sp.QueueMessage(&wire.MsgHeaders{Headers: blockHeaders}, nil)
 }
 
+
 // OnGetCFilters is invoked when a peer receives a getcfilters bitcoin message.
 func (sp *serverPeer) OnGetCFilters(_ *peer.Peer, msg *wire.MsgGetCFilters) {
 	// Ignore getcfilters requests if not in sync.
@@ -2065,7 +2066,11 @@ func (s *server) peerHandler() {
 	// to this handler and rather than adding more channels to sychronize
 	// things, it's easier and slightly faster to simply start and stop them
 	// in this handler.
+	//启动节点地址管理，方法主要逻辑：
 	s.addrManager.Start()
+	//loadPeers负责反序列化peers.json文件，addrManager维护了NewBucket和TriedBucket两个地址列表
+
+	//blockHandler作用主要负责处理新节点、交易、块信息、头信息、节点断开等消息。代码如下：
 	s.syncManager.Start()
 
 	srvrLog.Tracef("Starting peer handler")
@@ -2090,6 +2095,8 @@ func (s *server) peerHandler() {
 				s.addrManager.AddAddresses(addrs, addrs[0])
 			})
 	}
+
+	//启动连接管理，默认建立8个出口连接，负责管理连接的连接、断开。主要代码：
 	go s.connManager.Start()
 
 out:
@@ -2290,6 +2297,7 @@ cleanup:
 // Start begins accepting connections from peers.
 func (s *server) Start() {
 	// Already started?
+	//设置只启动一次
 	if atomic.AddInt32(&s.started, 1) != 1 {
 		return
 	}
@@ -2302,6 +2310,7 @@ func (s *server) Start() {
 	// Start the peer handler which in turn starts the address and block
 	// managers.
 	s.wg.Add(1)
+	//异步启动节点处理，包括启动地址管理、启动区块同步、启动连接管理。peerHandler处理逻辑较多，代码在最后解析。
 	go s.peerHandler()
 
 	if s.nat != nil {
@@ -2321,6 +2330,7 @@ func (s *server) Start() {
 
 	// Start the CPU miner if generation is enabled.
 	if cfg.Generate {
+		//开始CPU挖矿
 		s.cpuMiner.Start()
 	}
 }
@@ -2555,7 +2565,8 @@ func setupRPCListeners() ([]net.Listener, error) {
 func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	db database.DB, chainParams *chaincfg.Params,
 	interrupt <-chan struct{}) (*server, error) {
-
+	//defaultServices = wire.SFNodeNetwork | wire.SFNodeBloom | wire.SFNodeWitness | wire.SFNodeCF
+	//btcd默认启用全节点、Bloom过滤器、见证隔离、提交过滤。
 	services := defaultServices
 	if cfg.NoPeerBloomFilters {
 		services &^= wire.SFNodeBloom
@@ -2563,13 +2574,14 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	if cfg.NoCFilters {
 		services &^= wire.SFNodeCF
 	}
-
+	//创建一个网络地址管理对象，负责管理与其连接的地址（支持tor地址）。所有连接的节点数据都默认保存到peers.json文件中。
 	amgr := addrmgr.New(cfg.DataDir, btcdLookup)
 
 	var listeners []net.Listener
 	var nat NAT
 	if !cfg.DisableListen {
 		var err error
+		//使用配置的externalIPs或upnp对外部IP监听
 		listeners, nat, err = initListeners(amgr, listenAddrs, services)
 		if err != nil {
 			return nil, err
@@ -2585,7 +2597,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	if len(agentWhitelist) > 0 {
 		srvrLog.Infof("User-agent whitelist %s", agentWhitelist)
 	}
-
+	//创建server对象，其中有对chainParams、sigCache、hashCache等的初始化
 	s := server{
 		chainParams:          chainParams,
 		addrManager:          amgr,
@@ -2642,6 +2654,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	}
 
 	// Create an index manager if any of the optional indexes are enabled.
+	//使用txIndex、addrIndex、cfIndex创建一个索引管理器
 	var indexManager blockchain.IndexManager
 	if len(indexes) > 0 {
 		indexManager = indexers.NewManager(db, indexes)
@@ -2655,6 +2668,8 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 
 	// Create a new block chain instance with the appropriate configuration.
 	var err error
+	//创建一个blockchain对象并赋值给server对象
+
 	s.chain, err = blockchain.New(&blockchain.Config{
 		DB:           s.db,
 		Interrupt:    interrupt,
@@ -2699,6 +2714,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 			mempool.DefaultEstimateFeeMinRegisteredBlocks)
 	}
 
+	//创建未打包的交易内存池
 	txC := mempool.Config{
 		Policy: mempool.Policy{
 			DisableRelayPriority: cfg.NoRelayPriority,
@@ -2726,6 +2742,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	}
 	s.txMemPool = mempool.New(&txC)
 
+	//新建网络同步对象，并赋值给server.syncManager
 	s.syncManager, err = netsync.New(&netsync.Config{
 		PeerNotifier:       &s,
 		Chain:              s.chain,
@@ -2744,6 +2761,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	//
 	// NOTE: The CPU miner relies on the mempool, so the mempool has to be
 	// created before calling the function to create the CPU miner.
+	//新建挖矿策略
 	policy := mining.Policy{
 		BlockMinWeight:    cfg.BlockMinWeight,
 		BlockMaxWeight:    cfg.BlockMaxWeight,
@@ -2755,6 +2773,8 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	blockTemplateGenerator := mining.NewBlkTmplGenerator(&policy,
 		s.chainParams, s.txMemPool, s.chain, s.timeSource,
 		s.sigCache, s.hashCache)
+
+	//创建cpu挖矿对象
 	s.cpuMiner = cpuminer.New(&cpuminer.Config{
 		ChainParams:            chainParams,
 		BlockTemplateGenerator: blockTemplateGenerator,
@@ -2815,6 +2835,8 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	if cfg.MaxPeers < targetOutbound {
 		targetOutbound = cfg.MaxPeers
 	}
+
+	//创建节点连接对象
 	cmgr, err := connmgr.New(&connmgr.Config{
 		Listeners:      listeners,
 		OnAccept:       s.inboundPeerConnected,
@@ -2857,6 +2879,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 			return nil, errors.New("RPCS: No valid listen address")
 		}
 
+		//创建RPCserver
 		s.rpcServer, err = newRPCServer(&rpcserverConfig{
 			Listeners:    rpcListeners,
 			StartupTime:  s.startupTime,
