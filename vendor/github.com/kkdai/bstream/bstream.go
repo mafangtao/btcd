@@ -11,48 +11,47 @@ const (
 
 //BStream :
 type BStream struct {
-	stream []byte
-	rCount uint8 // Number of bits still unread from the first byte of the stream
-	wCount uint8 // Number of bits still empty in the last byte of the stream
+	stream      []byte
+	remainCount uint8
 }
 
 //NewBStreamReader :
 func NewBStreamReader(data []byte) *BStream {
-	return &BStream{stream: data, rCount: 8}
+	return &BStream{stream: data, remainCount: 8}
 }
 
 //NewBStreamWriter :
 func NewBStreamWriter(nByte uint8) *BStream {
-	return &BStream{stream: make([]byte, 0, nByte), rCount: 8}
+	return &BStream{stream: make([]byte, 0, nByte), remainCount: 0}
 }
 
 //WriteBit :
 func (b *BStream) WriteBit(input bit) {
-	if b.wCount == 0 {
+	if b.remainCount == 0 {
 		b.stream = append(b.stream, 0)
-		b.wCount = 8
+		b.remainCount = 8
 	}
 
 	latestIndex := len(b.stream) - 1
 	if input {
-		b.stream[latestIndex] |= 1 << (b.wCount - 1)
+		b.stream[latestIndex] |= 1 << (b.remainCount - 1)
 	}
-	b.wCount--
+	b.remainCount--
 }
 
 //WriteOneByte :
 func (b *BStream) WriteOneByte(data byte) {
-	if b.wCount == 0 {
-		b.stream = append(b.stream, data)
-		return
+	if b.remainCount == 0 {
+		b.stream = append(b.stream, 0)
+		b.remainCount = 8
 	}
 
 	latestIndex := len(b.stream) - 1
 
-	b.stream[latestIndex] |= data >> (8 - b.wCount)
+	b.stream[latestIndex] |= data >> (8 - b.remainCount)
 	b.stream = append(b.stream, 0)
 	latestIndex++
-	b.stream[latestIndex] = data << b.wCount
+	b.stream[latestIndex] = data << b.remainCount
 }
 
 //WriteBits :
@@ -85,19 +84,20 @@ func (b *BStream) ReadBit() (bit, error) {
 	}
 
 	//if first byte already empty, move to next byte to retrieval
-	if b.rCount == 0 {
+	if b.remainCount == 0 {
 		b.stream = b.stream[1:]
 
 		if len(b.stream) == 0 {
 			return zero, io.EOF
 		}
 
-		b.rCount = 8
+		b.remainCount = 8
 	}
 
 	// handle bit retrieval
-	retBit := b.stream[0] & (1 << (b.rCount - 1))
-	b.rCount--
+	retBit := b.stream[0] & 0x80
+	b.stream[0] <<= 1
+	b.remainCount--
 
 	return retBit != 0, nil
 }
@@ -109,25 +109,25 @@ func (b *BStream) ReadByte() (byte, error) {
 	}
 
 	//if first byte already empty, move to next byte to retrieval
-	if b.rCount == 0 {
+	if b.remainCount == 0 {
 		b.stream = b.stream[1:]
 
 		if len(b.stream) == 0 {
 			return 0, io.EOF
 		}
 
-		b.rCount = 8
+		b.remainCount = 8
 	}
 
 	//just remain 8 bit, just return this byte directly
-	if b.rCount == 8 {
+	if b.remainCount == 8 {
 		byt := b.stream[0]
 		b.stream = b.stream[1:]
 		return byt, nil
 	}
 
 	//handle byte retrieval
-	retByte := b.stream[0] << (8 - b.rCount)
+	retByte := b.stream[0]
 	b.stream = b.stream[1:]
 
 	//check if we could finish retrieval on next byte
@@ -136,7 +136,8 @@ func (b *BStream) ReadByte() (byte, error) {
 	}
 
 	//handle remain bit on next stream
-	retByte |= b.stream[0] >> b.rCount
+	retByte |= b.stream[0] >> b.remainCount
+	b.stream[0] <<= (8 - b.remainCount)
 	return retByte, nil
 }
 
