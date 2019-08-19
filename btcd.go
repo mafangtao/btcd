@@ -166,7 +166,7 @@ func btcdMain(serverChan chan<- *server) error {
 	//	// Chain parameters
 	//	GenesisBlock:             &genesisBlock,
 	//}
-
+	btcdLog.Infof("new  %s", "新建server")
 	server, err := newServer(cfg.Listeners, cfg.AgentBlacklist,
 		cfg.AgentWhitelist, db, activeNetParams.Params, interrupt)
 	if err != nil {
