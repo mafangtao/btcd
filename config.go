@@ -30,7 +30,7 @@ import (
 	"github.com/btcsuite/btcd/peer"
 	"github.com/btcsuite/btcutil"
 	"github.com/btcsuite/go-socks/socks"
-	flags "github.com/jessevdk/go-flags"
+	"github.com/jessevdk/go-flags"
 )
 
 const (
@@ -67,9 +67,11 @@ const (
 )
 
 var (
+	//linux版本默认返回~/.btcd/
 	defaultHomeDir     = btcutil.AppDataDir("btcd", false)
 	defaultConfigFile  = filepath.Join(defaultHomeDir, defaultConfigFilename)
 	defaultDataDir     = filepath.Join(defaultHomeDir, defaultDataDirname)
+	//返回支持的数据库驱动的[]string
 	knownDbTypes       = database.SupportedDrivers()
 	defaultRPCKeyFile  = filepath.Join(defaultHomeDir, "rpc.key")
 	defaultRPCCertFile = filepath.Join(defaultHomeDir, "rpc.cert")
@@ -216,6 +218,24 @@ func validLogLevel(logLevel string) bool {
 
 // supportedSubsystems returns a sorted slice of the supported subsystems for
 // logging purposes.
+//返回排序的子系统,为日志做准备
+//var subsystemLoggers = map[string]btclog.Logger{
+//	"ADXR": adxrLog,
+//	"AMGR": amgrLog,
+//	"CMGR": cmgrLog,
+//	"BCDB": bcdbLog,
+//	"BTCD": btcdLog,
+//	"CHAN": chanLog,
+//	"DISC": discLog,
+//	"INDX": indxLog,
+//	"MINR": minrLog,
+//	"PEER": peerLog,
+//	"RPCS": rpcsLog,
+//	"SCRP": scrpLog,
+//	"SRVR": srvrLog,
+//	"SYNC": syncLog,
+//	"TXMP": txmpLog,
+//}
 func supportedSubsystems() []string {
 	// Convert the subsystemLoggers map keys to a slice.
 	subsystems := make([]string, 0, len(subsystemLoggers))
@@ -390,19 +410,21 @@ func newConfigParser(cfg *config, so *serviceOptions, options flags.Options) *fl
 	}
 	return parser
 }
-
+//通过配置文件和命令行选项初始化配置
 // loadConfig initializes and parses the config using a config file and command
 // line options.
 //
-// The configuration proceeds as follows:
-// 	1) Start with a default config with sane settings
+// The configuration proceeds as follows:配置如下进行
+//
+// 	1) Start with a default config with sane settings  从具有合理设置的默认配置开始
 // 	2) Pre-parse the command line to check for an alternative config file
 // 	3) Load configuration file overwriting defaults with any specified options
 // 	4) Parse CLI options and overwrite/add any specified options
-//
+//默认配置 --> 找到配置文件 --> 加载配置文件,覆盖默认配置 --> 命令行再覆盖配置文件
 // The above results in btcd functioning properly without any config settings
 // while still allowing the user to override settings with config files and
-// command line options.  Command line options always take precedence.
+// command line options.
+// Command line options always take precedence.   命令行选项始终优先
 func loadConfig() (*config, []string, error) {
 	// Default config.
 	cfg := config{

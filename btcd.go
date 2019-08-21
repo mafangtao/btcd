@@ -35,15 +35,19 @@ var (
 // as a service and reacts accordingly.
 var winServiceMain func() (bool, error)
 
+
+//对于os.Exit()被调用,而被延迟执行的函数并没按预期执行的事实,是很有必要去解决的.
 // btcdMain is the real main function for btcd.  It is necessary to work around
-// the fact that deferred functions do not run when os.Exit() is called.  The
-// optional serverChan parameter is mainly used by the service code to be
-// notified with the server once it is setup so it can gracefully stop it when
+// the fact that deferred functions do not run when os.Exit() is called.
+//serverChan通道主要被服务代码使用,一旦设置,服务器就会被通知,当服务控制器传来请求时,服务会被优雅地停止
+// The optional serverChan parameter is mainly used by the service code to be
+// notified with the server once it is setup, so it can gracefully stop it when
 // requested from the service control manager.
 func btcdMain(serverChan chan<- *server) error {
 	// Load configuration and parse command line.  This function also
 	// initializes logging and configures it accordingly.
-	//加载配置信息，使用了github.com/jessevdk/go-flags这个第三方库，可以实现从配置文件或命令行获取参数值，功能挺强大的库，近期也有一直在维护。
+	//加载配置信息，使用了github.com/jessevdk/go-flags这个第三方库，
+	// 可以实现从配置文件或命令行获取参数值，功能挺强大的库，近期也有一直在维护。
 	tcfg, _, err := loadConfig()
 	if err != nil {
 		return err
@@ -66,6 +70,7 @@ func btcdMain(serverChan chan<- *server) error {
 	btcdLog.Infof("Version %s", version())
 
 	// Enable http profiling server if requested.
+	// 开启http服务器性能监测
 	if cfg.Profile != "" {
 		go func() {
 			listenAddr := net.JoinHostPort("", cfg.Profile)
@@ -76,7 +81,7 @@ func btcdMain(serverChan chan<- *server) error {
 			btcdLog.Errorf("%v", http.ListenAndServe(listenAddr, nil))
 		}()
 	}
-
+	// 开启cpu性能监测
 	// Write cpu profile if requested.
 	if cfg.CPUProfile != "" {
 		f, err := os.Create(cfg.CPUProfile)
@@ -90,18 +95,21 @@ func btcdMain(serverChan chan<- *server) error {
 	}
 
 	// Perform upgrades to btcd as new versions require it.
+	// 升级老版本数据库相关文件路径
 	if err := doUpgrades(); err != nil {
 		btcdLog.Errorf("%v", err)
 		return err
 	}
 
 	// Return now if an interrupt signal was triggered.
+	// 是否有中断信号
 	if interruptRequested(interrupt) {
 		return nil
 	}
 
 	// Load the block database.
 	//根据cfg.DbType配置打开数据库连接。通过代码得知支持数据库有dbTypes := []string{"ffldb", "leveldb", "sqlite"}
+	// 加载区块数据库
 	db, err := loadBlockDB()
 	if err != nil {
 		btcdLog.Errorf("%v", err)
@@ -114,6 +122,7 @@ func btcdMain(serverChan chan<- *server) error {
 	}()
 
 	// Return now if an interrupt signal was triggered.
+	// 是否有中断信号
 	if interruptRequested(interrupt) {
 		return nil
 	}
@@ -122,6 +131,10 @@ func btcdMain(serverChan chan<- *server) error {
 	//
 	// NOTE: The order is important here because dropping the tx index also
 	// drops the address index since it relies on it.
+	// 删除地址索引，并退出程序
+	//
+	// 注意： 在这里删除顺序很重要，因为删除交易索引同时也会删除地址索引。
+	// 因为交易索引会依赖地址索引
 	if cfg.DropAddrIndex {
 		if err := indexers.DropAddrIndex(db, interrupt); err != nil {
 			btcdLog.Errorf("%v", err)
@@ -130,6 +143,7 @@ func btcdMain(serverChan chan<- *server) error {
 
 		return nil
 	}
+	// 删除交易索引，并退出程序
 	if cfg.DropTxIndex {
 		if err := indexers.DropTxIndex(db, interrupt); err != nil {
 			btcdLog.Errorf("%v", err)
@@ -138,6 +152,7 @@ func btcdMain(serverChan chan<- *server) error {
 
 		return nil
 	}
+	// 删除交易索引，并退出程序
 	if cfg.DropCfIndex {
 		if err := indexers.DropCfIndex(db, interrupt); err != nil {
 			btcdLog.Errorf("%v", err)
@@ -167,6 +182,7 @@ func btcdMain(serverChan chan<- *server) error {
 	//	GenesisBlock:             &genesisBlock,
 	//}
 	btcdLog.Infof("new  %s", "新建server")
+	// 创建服务器，并启动
 	server, err := newServer(cfg.Listeners, cfg.AgentBlacklist,
 		cfg.AgentWhitelist, db, activeNetParams.Params, interrupt)
 	if err != nil {
@@ -189,6 +205,7 @@ func btcdMain(serverChan chan<- *server) error {
 	// Wait until the interrupt signal is received from an OS signal or
 	// shutdown is requested through one of the subsystems such as the RPC
 	// server.
+	//挂起主线程，等待中断信号
 	<-interrupt
 	return nil
 }
@@ -327,11 +344,14 @@ func main() {
 	// limits the garbage collector from excessively overallocating during
 	// bursts.  This value was arrived at with the help of profiling live
 	// usage.
+	//设置触发GC垃圾收集器阀值： 10% ， 即 最新分布的内存大小/上次GC之后活动内存大小*100
 	debug.SetGCPercent(10)
 
 	// Up some limits.
 	//limits包中有针对不同平台的三个文件：limits_plan9.go limits_unix.go limits_windows.go
 	//设置系统资源限制
+	//设置进程能打开的最大文件资源,即file descriptor数量。
+	// 做linux系统中，所有资源(pipe, socket, file等等)都以文件形式出现。
 	if err := limits.SetLimits(); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to set limits: %v\n", err)
 		os.Exit(1)
